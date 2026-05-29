@@ -109,12 +109,12 @@ This permission check is applied only when players try to use Image Display plac
 
 Image Display requires:
 
-* **PlaceholderAPI** — for placeholders
-* **ProtocolLib** — for image display and detection client version
+* **[PlaceholderAPI](https://modrinth.com/plugin/placeholderapi) — for placeholders**
+* **[ProtocolLib](https://github.com/dmulloy2/ProtocolLib/releases/tag/dev-build) — for image display and detection client version**
 
 Optional:
 
-* **ViaVersion** — useful for for detection client version
+* **[ViaVersion](https://modrinth.com/plugin/viaversion) — useful for for detection client version**
 
 ### How it works?
 
