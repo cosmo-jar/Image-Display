@@ -156,3 +156,4 @@ Then run the command
 ```
 * Support for multiple localizations
 * I recommend fonts: Minecraftia, Press Start 2P or any bitmap-style.
+* You can generate images [here](https://itemsadder.github.io/minecraft-rank-generator) and [here](https://amgewka.github.io/minecraft-rank-generator-RU)
