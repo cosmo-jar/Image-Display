@@ -1,5 +1,13 @@
 <img width="2172" height="724" alt="logoooooo" src="https://github.com/user-attachments/assets/4807e40f-a056-4f3b-aafe-d5d9a86a6deb" />
 
+<p align="center">
+    <a href="https://modrinth.com/plugin/image-display">
+        <img src="https://github.com/user-attachments/assets/1c21cd8a-6788-4b47-aa07-787982ede31a" width="180" alt="Download on Modrinth">
+    </a>
+</p>
+
+
+
 # Where can it be used?
 Turn any image into a grid of MineSkin-powered head textures, then use it in chat, TAB header/footer, prefixes/suffixes, nametags, holograms, titles, scoreboard and other.
 Image Display is perfect for server logos, icons, decorations, rank visuals, hologram art, lobby branding, and other visual UI elements without forcing a resource pack.
