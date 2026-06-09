@@ -1,0 +1,17 @@
+ImageDisplay:
+  enabled: true
+
+  # Choosing the plugin localization
+  locale: "en"
+
+  pictures-folder: "pictures"
+
+  cache-folder: "pictures_cache"
+
+  # What should the placeholder display for client versions below 1.21.9?
+  fallback-title: ''
+
+  min-client-version: "1.21.9"
+
+  # Your MineSkin api key
+  mineskin-api-key: ""

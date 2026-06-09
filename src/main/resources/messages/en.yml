@@ -1,0 +1,29 @@
+plugin:
+  enabled: "<#7CFC8A>ImageDisplay enabled. Locale: <white><locale></white>"
+
+commands:
+  no-permission: "<red>You do not have permission.</red>"
+  usage: "<yellow>Usage: /<label> <white>reload</white> | <white>generate <picture-file> [texture-id]</white></yellow>"
+  reload:
+    success: "<#7CFC8A>Image Display reloaded.</#7CFC8A>"
+  generate:
+    usage: "<yellow>Usage: /<label> generate <picture-file> [texture-id]</yellow>"
+    started: "<gray>Generating texture from <white><picture></white>...</gray>"
+    success: "<#7CFC8A>Generated texture id: <white><id></white> | Placeholder: <white><placeholder></white></#7CFC8A>"
+    failed: "<red>Generation failed: <white><reason></white></red>"
+
+log:
+  console:
+    prefix: "<gradient:#7B61FF:#28D7FF>[ImageDisplay]</gradient>"
+    level-info: "<#79F2A9>INFO</#79F2A9>"
+    level-warn: "<#FFB27D>WARN</#FFB27D>"
+  bridge:
+    packet-error: "Packet bridge error: <reason>"
+  service:
+    mineskin-limit: "MineSkin limit (<code>), retry <attempt>/<max_attempts> after <delay_ms>ms"
+  tab:
+    bridge-enable-failed: "Failed to enable TAB placeholder bridge"
+    refresh-failed: "Failed to refresh TAB image placeholders"
+    force-refresh-failed: "Failed to force TAB visual refresh"
+    load-listener-register-failed: "Could not register TAB load listener"
+    minimessage-enabled-warning: "TAB config has components.minimessage-support=true. For image rendering in tabprefix/tagprefix set it to false and run /tab reload."

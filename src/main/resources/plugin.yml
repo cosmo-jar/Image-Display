@@ -1,0 +1,17 @@
+name: ImageDisplay
+version: '${version}'
+main: dev.cosmo.imagedisplay.ImageDisplay
+api-version: '1.21'
+authors: [cosmo]
+website: https://github.com/cosmo-jar
+description: Image display renderer with MineSkin no required resource pack
+softdepend: [PlaceholderAPI, ProtocolLib, ViaVersion, TAB, DecentHolograms, LuckPerms]
+commands:
+  imagedisplay:
+    description: ImageDisplay management commands
+    usage: /imagedisplay <reload|generate>
+permissions:
+  imagedisplay.command.reload:
+    default: op
+  imagedisplay.command.generate:
+    default: op

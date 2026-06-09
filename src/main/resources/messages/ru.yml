@@ -1,0 +1,29 @@
+plugin:
+  enabled: "<#7CFC8A>ImageDisplay запущен. Локализация: <white><locale></white>"
+
+commands:
+  no-permission: "<red>Недостаточно прав.</red>"
+  usage: "<yellow>Использование: /<label> <white>reload</white> | <white>generate <picture-file> [texture-id]</white></yellow>"
+  reload:
+    success: "<#7CFC8A>Image Display перезагружен.</#7CFC8A>"
+  generate:
+    usage: "<yellow>Использование: /<label> generate <picture-file> [texture-id]</yellow>"
+    started: "<gray>Генерация текстуры из <white><picture></white>...</gray>"
+    success: "<#7CFC8A>Сгенерирован id: <white><id></white> | Плейсхолдер: <white><placeholder></white></#7CFC8A>"
+    failed: "<red>Ошибка генерации: <white><reason></white></red>"
+
+log:
+  console:
+    prefix: "<gradient:#7B61FF:#28D7FF>[ImageDisplay]</gradient>"
+    level-info: "<#79F2A9>INFO</#79F2A9>"
+    level-warn: "<#FFB27D>WARN</#FFB27D>"
+  bridge:
+    packet-error: "Ошибка packet bridge: <reason>"
+  service:
+    mineskin-limit: "Лимит MineSkin (<code>), повтор <attempt>/<max_attempts> через <delay_ms>мс"
+  tab:
+    bridge-enable-failed: "Не удалось включить TAB placeholder bridge"
+    refresh-failed: "Не удалось обновить TAB image placeholders"
+    force-refresh-failed: "Не удалось принудительно обновить визуал TAB"
+    load-listener-register-failed: "Не удалось зарегистрировать TAB load listener"
+    minimessage-enabled-warning: "В конфиге TAB включен components.minimessage-support=true. Для показа картинок в tabprefix/tagprefix отключите его и выполните /tab reload."
