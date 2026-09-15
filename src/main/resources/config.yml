@@ -13,5 +13,16 @@ ImageDisplay:
 
   min-client-version: "1.21.9"
 
-  # Your MineSkin api key
-  mineskin-api-key: ""
+  # MineSkin API keys (slots 1-10)
+  # You can specify multiple keys to distribute load or generate images in parallel.
+  mineskin-api-keys:
+    1: ""
+    2: ""
+    3: ""
+    4: ""
+    5: ""
+    6: ""
+    7: ""
+    8: ""
+    9: ""
+    10: ""
