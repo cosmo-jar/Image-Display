@@ -3,14 +3,33 @@ plugin:
 
 commands:
   no-permission: "<red>Недостаточно прав.</red>"
-  usage: "<yellow>Использование: /<label> <white>reload</white> | <white>generate <picture-file> [texture-id]</white></yellow>"
+  usage: "<yellow>Использование: /<label> <white>reload</white> | <white>generate <picture-file> [texture-id] [--apikey <slot>]</white> | <white>cancel [texture-id]</white></yellow>"
   reload:
     success: "<#7CFC8A>Image Display перезагружен.</#7CFC8A>"
+  cancel:
+    usage: "<yellow>Использование: /<label> cancel [texture-id|all]</yellow>"
+    success: "<#7CFC8A>Генерация <white><id></white> успешно отменена.</#7CFC8A>"
+    success-all: "<#7CFC8A>Все активные генерации отменены.</#7CFC8A>"
+    no-active: "<gray>Сейчас нет активных генераций.</gray>"
+    not-found: "<red>Активная генерация с ID <white><id></white> не найдена.</red>"
+    multiple-active: "<yellow>Активно несколько генераций: <white><ids></white>. Укажите id: /<label> cancel <id> (или /<label> cancel all)</yellow>"
   generate:
-    usage: "<yellow>Использование: /<label> generate <picture-file> [texture-id]</yellow>"
-    started: "<gray>Генерация текстуры из <white><picture></white>...</gray>"
-    success: "<#7CFC8A>Сгенерирован id: <white><id></white> | Плейсхолдер: <white><placeholder></white></#7CFC8A>"
+    usage: "<yellow>Использование: /<label> generate <picture-file> [texture-id] [--apikey <slot>]</yellow>"
+    started: "<gray>Генерация текстуры из <white><picture></white> <dark_gray>(ключ #<key>)</dark_gray>...</gray>"
+    success: "<#7CFC8A>Сгенерирован id: <white><id></white> | Плейсхолдер: <click:copy_to_clipboard:'<placeholder>'><hover:show_text:'<gray>Нажмите, чтобы скопировать плейсхолдер</gray>'><white><placeholder></white></hover></click> <click:copy_to_clipboard:'<placeholder>'><hover:show_text:'<gray>Нажмите, чтобы скопировать в буфер</gray>'><bold><#5555FF>[Скопировать]</#5555FF></bold></hover></click></#7CFC8A>"
     failed: "<red>Ошибка генерации: <white><reason></white></red>"
+    cancelled: "<yellow>Генерация картинки <white><picture></white> была отменена.</yellow>"
+    invalid-apikey: "<red>Неверный номер API ключа: <white><key></white></red>"
+    apikey-not-found: "<red>API ключ #<slot> не настроен в конфиге. Доступные слоты: <white><available></white></red>"
+    no-apikeys: "<red>В конфиге не настроен ни один API ключ MineSkin.</red>"
+    bossbar:
+      title: "<gradient:#7B61FF:#28D7FF>ImageDisplay</gradient> <dark_gray>•</dark_gray> <white><picture></white> <gray>(#<key>, <current>/<total>)</gray> <#79F2A9><percent>%</#79F2A9> <dark_gray>•</dark_gray> <gray><status></gray>"
+      status-preparing: "Подготовка..."
+      status-queued: "В очереди MineSkin..."
+      status-active: "Обработка Mojang..."
+      status-completed: "Готово!"
+    console-progress: "Генерация <white><picture></white> (ключ #<key>): тайл <current>/<total> (<percent>%) <dark_gray>•</dark_gray> <status>"
+    console-cancelled: "Генерация <white><picture></white> отменена."
 
 log:
   console:
@@ -21,6 +40,8 @@ log:
     packet-error: "Ошибка packet bridge: <reason>"
   service:
     mineskin-limit: "Лимит MineSkin (<code>), повтор <attempt>/<max_attempts> через <delay_ms>мс"
+    mineskin-rate-limit: "Ожидание очереди MineSkin (429), повтор <attempt>/<max_attempts> через <delay_ms>мс"
+    mineskin-gateway-delay: "Задержка шлюза MineSkin (<code>), повтор <attempt>/<max_attempts> через <delay_ms>мс"
   tab:
     bridge-enable-failed: "Не удалось включить TAB placeholder bridge"
     refresh-failed: "Не удалось обновить TAB image placeholders"

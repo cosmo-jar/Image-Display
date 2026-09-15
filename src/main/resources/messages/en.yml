@@ -3,14 +3,33 @@ plugin:
 
 commands:
   no-permission: "<red>You do not have permission.</red>"
-  usage: "<yellow>Usage: /<label> <white>reload</white> | <white>generate <picture-file> [texture-id]</white></yellow>"
+  usage: "<yellow>Usage: /<label> <white>reload</white> | <white>generate <picture-file> [texture-id] [--apikey <slot>]</white> | <white>cancel [texture-id]</white></yellow>"
   reload:
     success: "<#7CFC8A>Image Display reloaded.</#7CFC8A>"
+  cancel:
+    usage: "<yellow>Usage: /<label> cancel [texture-id|all]</yellow>"
+    success: "<#7CFC8A>Generation <white><id></white> was successfully cancelled.</#7CFC8A>"
+    success-all: "<#7CFC8A>All active generations were cancelled.</#7CFC8A>"
+    no-active: "<gray>There are no active generations currently running.</gray>"
+    not-found: "<red>Active generation with ID <white><id></white> not found.</red>"
+    multiple-active: "<yellow>Multiple generations are active: <white><ids></white>. Specify an ID: /<label> cancel <id> (or /<label> cancel all)</yellow>"
   generate:
-    usage: "<yellow>Usage: /<label> generate <picture-file> [texture-id]</yellow>"
-    started: "<gray>Generating texture from <white><picture></white>...</gray>"
-    success: "<#7CFC8A>Generated texture id: <white><id></white> | Placeholder: <white><placeholder></white></#7CFC8A>"
+    usage: "<yellow>Usage: /<label> generate <picture-file> [texture-id] [--apikey <slot>]</yellow>"
+    started: "<gray>Generating texture from <white><picture></white> <dark_gray>(key #<key>)</dark_gray>...</gray>"
+    success: "<#7CFC8A>Generated texture id: <white><id></white> | Placeholder: <click:copy_to_clipboard:'<placeholder>'><hover:show_text:'<gray>Click to copy placeholder</gray>'><white><placeholder></white></hover></click> <click:copy_to_clipboard:'<placeholder>'><hover:show_text:'<gray>Click to copy to clipboard</gray>'><bold><#5555FF>[Copy]</#5555FF></bold></hover></click></#7CFC8A>"
     failed: "<red>Generation failed: <white><reason></white></red>"
+    cancelled: "<yellow>Generation of <white><picture></white> was cancelled.</yellow>"
+    invalid-apikey: "<red>Invalid API key slot number: <white><key></white></red>"
+    apikey-not-found: "<red>API key #<slot> is not configured or empty. Available slots: <white><available></white></red>"
+    no-apikeys: "<red>No MineSkin API keys configured in config.</red>"
+    bossbar:
+      title: "<gradient:#7B61FF:#28D7FF>ImageDisplay</gradient> <dark_gray>•</dark_gray> <white><picture></white> <gray>(#<key>, <current>/<total>)</gray> <#79F2A9><percent>%</#79F2A9> <dark_gray>•</dark_gray> <gray><status></gray>"
+      status-preparing: "Preparing..."
+      status-queued: "Waiting in MineSkin queue..."
+      status-active: "Mojang processing..."
+      status-completed: "Done!"
+    console-progress: "Generating <white><picture></white> (key #<key>): tile <current>/<total> (<percent>%) <dark_gray>•</dark_gray> <status>"
+    console-cancelled: "Generation of <white><picture></white> cancelled."
 
 log:
   console:
@@ -21,6 +40,8 @@ log:
     packet-error: "Packet bridge error: <reason>"
   service:
     mineskin-limit: "MineSkin limit (<code>), retry <attempt>/<max_attempts> after <delay_ms>ms"
+    mineskin-rate-limit: "Waiting for MineSkin queue slot (429), retry <attempt>/<max_attempts> after <delay_ms>ms"
+    mineskin-gateway-delay: "MineSkin gateway delay (<code>), retry <attempt>/<max_attempts> after <delay_ms>ms"
   tab:
     bridge-enable-failed: "Failed to enable TAB placeholder bridge"
     refresh-failed: "Failed to refresh TAB image placeholders"
