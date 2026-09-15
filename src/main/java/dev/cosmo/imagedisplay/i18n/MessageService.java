@@ -57,7 +57,9 @@ public final class MessageService {
 
         List<TagResolver> resolvers = new ArrayList<>(placeholders.size());
         for (Map.Entry<String, String> entry : placeholders.entrySet()) {
-            resolvers.add(Placeholder.parsed(entry.getKey(), Objects.toString(entry.getValue(), "")));
+            String value = Objects.toString(entry.getValue(), "");
+            template = template.replace("<" + entry.getKey() + ">", value);
+            resolvers.add(Placeholder.parsed(entry.getKey(), value));
         }
         return miniMessage.deserialize(template, TagResolver.resolver(resolvers));
     }
