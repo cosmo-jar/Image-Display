@@ -23,7 +23,11 @@ Image Display is perfect for server logos, icons, decorations, rank visuals, hol
 * Works in any chat through ProtocolLib component replacement
 * Uses local JSON image cache after generation
 * Permission control for usage
-* Fallback text for unsupported clients 
+* Fallback text for unsupported clients
+* Multi-API Key Pool: Supports up to 10 MineSkin keys in config with auto-balancing and `--apikey` selection
+* Real-time BossBar with percentage, tile counters, and Mojang queue status
+* Instant cancellation of running tasks via `/imagedisplay cancel`
+* Mojang rate-limit protection with automatic retry
 <details>
 <summary>Spoiler</summary>
 
@@ -50,6 +54,7 @@ plugins/ImageDisplay/pictures/
 Examples:
 
 ```text
+~40x8 (recomended for donator ranks)
 16x16
 32x32
 64x8
@@ -60,14 +65,19 @@ Examples:
 128x128
 256x128
 ```
+* **Height rule**: Use a height of **8 pixels** for single-line text (chat, prefixes, TAB), as Minecraft font characters are 8px tall. Taller images (16px, 24px) will render across multiple lines.
+* **Pro tip**: Draw your images as **1:1 pixel art** with an 8px height to ensure crisp, pixel-perfect icons without any blur!
 
 **2. Specify your MineSkin API key in the plugin configuration**
 It's free: [You can get it here](https://mineskin.org/apikey)
 
-Paste API key to:
+Paste your key(s) into `config.yml`. You can add multiple keys to generate several images concurrently without hitting Mojang rate limits:
 
 ```
-mineskin-api-key: "here"
+ImageDisplay:
+  mineskin-api-keys:
+    1: "your_primary_api_key"
+    2: "optional_second_api_key"
 ```
 
 
@@ -76,12 +86,16 @@ mineskin-api-key: "here"
 Run the command:
 
 ```text
-/imagedisplay generate your_image_name.png
+/imagedisplay generate <image.png> [optional_custom_id] [--apikey <slot>]
 ```
 
-**4. Wait generation**
+**4. Monitor or cancel generation**
 
-Wait for a chat message about successful generation, or check the console.
+Watch the live **BossBar** showing progress and queue status. If needed, you can cancel running generations at any time:
+```
+/imagedisplay cancel <id>
+/imagedisplay cancel all
+```
 
 **5. Use the placeholder**
 
@@ -122,7 +136,7 @@ Image Display requires:
 
 Optional:
 
-* **[ViaVersion](https://modrinth.com/plugin/viaversion) — useful for for detection client version**
+* **[ViaVersion](https://modrinth.com/plugin/viaversion) — useful for client version detection**
 
 ### How it works?
 
@@ -134,7 +148,7 @@ The plugin then stores the result in local JSON cache files. After generation, t
 * TAB
 * Chatty
 * ChatEx
-* Citizen
+* Citizens
 * FancyNPC
 * DeluxeHub
 * LuckPerms
@@ -163,5 +177,4 @@ Then run the command
 /tab reload
 ```
 * Support for multiple localizations
-* I recommend fonts: Minecraftia, Press Start 2P or any bitmap-style.
-* You can generate images [here](https://itemsadder.github.io/minecraft-rank-generator) and [here](https://amgewka.github.io/minecraft-rank-generator-RU)
+* I recommend fonts: Minecraftia, Press Start 2P, any bitmap-style or default font in pixel art style..
