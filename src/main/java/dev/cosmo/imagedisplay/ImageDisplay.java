@@ -77,6 +77,9 @@ public final class ImageDisplay extends JavaPlugin implements Listener {
 
     @Override
     public void onDisable() {
+        if (service != null) {
+            service.cancelAllGenerations();
+        }
         if (bridge != null) {
             bridge.disable();
         }
