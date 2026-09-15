@@ -20,7 +20,30 @@ public interface ImageDisplayApi {
 
     java.util.List<String> getPictureFileNames();
 
-    java.util.concurrent.CompletableFuture<String> generateTextureFromPicture(String pictureFileName, String requestedId);
+    @FunctionalInterface
+    interface GenerationProgressListener {
+        void onProgress(int currentTile, int totalTiles, String statusKey);
+    }
+
+    java.util.Set<Integer> getAvailableApiKeySlots();
+
+    default java.util.concurrent.CompletableFuture<String> generateTextureFromPicture(String pictureFileName, String requestedId) {
+        return generateTextureFromPicture(pictureFileName, requestedId, null, null);
+    }
+
+    default java.util.concurrent.CompletableFuture<String> generateTextureFromPicture(String pictureFileName, String requestedId, GenerationProgressListener listener) {
+        return generateTextureFromPicture(pictureFileName, requestedId, null, listener);
+    }
+
+    java.util.concurrent.CompletableFuture<String> generateTextureFromPicture(String pictureFileName, String requestedId, Integer apiKeySlot, GenerationProgressListener listener);
+
+    boolean cancelGeneration(String textureId);
+
+    boolean cancelAllGenerations();
+
+    java.util.Set<String> getActiveGenerationIds();
+
+    boolean isGenerationActive();
 
     String renderFallbackTitle(Player player);
 
