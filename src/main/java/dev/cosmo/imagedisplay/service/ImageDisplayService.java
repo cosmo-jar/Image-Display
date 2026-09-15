@@ -2,6 +2,7 @@ package dev.cosmo.imagedisplay.service;
 
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
+import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
@@ -27,11 +28,16 @@ import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.TreeSet;
 import java.util.UUID;
+import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ThreadLocalRandom;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import javax.imageio.ImageIO;
@@ -57,6 +63,8 @@ public final class ImageDisplayService implements ImageDisplayApi {
     private static final int DEFAULT_MIN_PROTOCOL_1_21_9 = 773;
     private static final int MAX_MINE_SKIN_RETRIES = 8;
     private static final long DEFAULT_RETRY_DELAY_MILLIS = 3500L;
+    private static final int MAX_POLL_ATTEMPTS = 60;
+    private static final long DEFAULT_POLL_DELAY_MILLIS = 1200L;
 
     private final Plugin plugin;
     private final MessageService messages;
@@ -65,14 +73,15 @@ public final class ImageDisplayService implements ImageDisplayApi {
 
     private volatile boolean enabled;
     private volatile String fallbackTitle;
-    private volatile String apiKey;
     private volatile int minClientProtocol = DEFAULT_MIN_PROTOCOL_1_21_9;
     private volatile File picturesFolder;
     private volatile File cacheFolder;
 
+    private final Map<Integer, String> apiKeys = new ConcurrentHashMap<>();
     private final Map<String, Component> textureComponents = new ConcurrentHashMap<>();
     private final Map<String, String> textureMarkup = new ConcurrentHashMap<>();
     private final Map<String, CachedTexture> cachedTextures = new ConcurrentHashMap<>();
+    private final Map<String, ActiveGenerationTask> activeGenerations = new ConcurrentHashMap<>();
 
     public ImageDisplayService(Plugin plugin, MessageService messages) {
         this.plugin = plugin;
@@ -84,11 +93,26 @@ public final class ImageDisplayService implements ImageDisplayApi {
 
     @Override
     public void reload() {
+        cancelAllGenerations();
         plugin.reloadConfig();
         enabled = plugin.getConfig().getBoolean("ImageDisplay.enabled", true);
         fallbackTitle = plugin.getConfig().getString("ImageDisplay.fallback-title", "");
-        apiKey = trimToEmpty(plugin.getConfig().getString("ImageDisplay.mineskin-api-key"));
         minClientProtocol = resolveMinProtocol(plugin.getConfig().getString("ImageDisplay.min-client-version", "1.21.9"));
+
+        apiKeys.clear();
+        org.bukkit.configuration.ConfigurationSection keysSection = plugin.getConfig().getConfigurationSection("ImageDisplay.mineskin-api-keys");
+        if (keysSection != null) {
+            for (String keyStr : keysSection.getKeys(false)) {
+                try {
+                    int slot = Integer.parseInt(keyStr);
+                    String val = trimToEmpty(keysSection.getString(keyStr));
+                    if (!val.isBlank()) {
+                        apiKeys.put(slot, val);
+                    }
+                } catch (NumberFormatException ignored) {
+                }
+            }
+        }
 
         String picturesPath = trimToEmpty(plugin.getConfig().getString("ImageDisplay.pictures-folder"));
         String cachePath = trimToEmpty(plugin.getConfig().getString("ImageDisplay.cache-folder"));
@@ -198,12 +222,43 @@ public final class ImageDisplayService implements ImageDisplayApi {
     }
 
     @Override
+    public Set<Integer> getAvailableApiKeySlots() {
+        return Collections.unmodifiableSet(new TreeSet<>(apiKeys.keySet()));
+    }
+
+    @Override
     public CompletableFuture<String> generateTextureFromPicture(String pictureFileName, String requestedId) {
+        return generateTextureFromPicture(pictureFileName, requestedId, null, null);
+    }
+
+    @Override
+    public CompletableFuture<String> generateTextureFromPicture(String pictureFileName, String requestedId, GenerationProgressListener listener) {
+        return generateTextureFromPicture(pictureFileName, requestedId, null, listener);
+    }
+
+    @Override
+    public CompletableFuture<String> generateTextureFromPicture(String pictureFileName, String requestedId, Integer apiKeySlot, GenerationProgressListener listener) {
         CompletableFuture<String> future = new CompletableFuture<>();
         Bukkit.getScheduler().runTaskAsynchronously(plugin, () -> {
+            ActiveGenerationTask task = null;
+            String normalizedTextureId = null;
             try {
-                if (apiKey.isBlank()) {
-                    throw new IllegalStateException("MineSkin API key is empty");
+                if (apiKeys.isEmpty()) {
+                    throw new IllegalStateException("No MineSkin API keys configured");
+                }
+
+                String chosenApiKey;
+                if (apiKeySlot != null) {
+                    chosenApiKey = apiKeys.get(apiKeySlot);
+                    if (chosenApiKey == null || chosenApiKey.isBlank()) {
+                        throw new IllegalArgumentException("API key slot #" + apiKeySlot + " is not configured or empty");
+                    }
+                } else {
+                    List<Integer> slots = new ArrayList<>(apiKeys.keySet());
+                    int slot = slots.size() == 1
+                            ? slots.get(0)
+                            : slots.get(ThreadLocalRandom.current().nextInt(slots.size()));
+                    chosenApiKey = apiKeys.get(slot);
                 }
 
                 File imageFile = resolvePictureFile(pictureFileName);
@@ -217,8 +272,20 @@ public final class ImageDisplayService implements ImageDisplayApi {
                 if (textureId.isEmpty()) {
                     throw new IllegalArgumentException("Invalid texture id: " + requestedId);
                 }
+                normalizedTextureId = textureId;
 
-                List<List<String>> valuesGrid = generateTextureValuesGrid(imageFile, textureId);
+                task = new ActiveGenerationTask(textureId, chosenApiKey);
+                task.setWorkerThread(Thread.currentThread());
+
+                ActiveGenerationTask existing = activeGenerations.putIfAbsent(textureId, task);
+                if (existing != null) {
+                    throw new IllegalStateException("Generation for texture id '" + textureId + "' is already running");
+                }
+
+                List<List<String>> valuesGrid = generateTextureValuesGrid(imageFile, textureId, task, listener);
+                if (task.isCancelled() || Thread.currentThread().isInterrupted()) {
+                    throw new CancellationException("Generation cancelled");
+                }
                 if (valuesGrid.isEmpty()) {
                     throw new IllegalStateException("No texture tiles were generated");
                 }
@@ -231,11 +298,57 @@ public final class ImageDisplayService implements ImageDisplayApi {
                 cachedTextures.put(textureId, cached);
                 saveCacheEntry(cached);
                 future.complete(textureId);
+            } catch (CancellationException ex) {
+                future.completeExceptionally(ex);
+            } catch (InterruptedException ex) {
+                future.completeExceptionally(new CancellationException("Generation interrupted"));
             } catch (Exception ex) {
                 future.completeExceptionally(ex);
+            } finally {
+                if (normalizedTextureId != null && task != null) {
+                    activeGenerations.remove(normalizedTextureId, task);
+                }
             }
         });
         return future;
+    }
+
+    @Override
+    public boolean cancelGeneration(String textureId) {
+        if (textureId == null || textureId.isBlank()) {
+            return false;
+        }
+        String normalized = normalizeTextureId(stripKnownSuffix(textureId));
+        ActiveGenerationTask task = activeGenerations.remove(normalized);
+        if (task != null) {
+            task.cancel();
+            return true;
+        }
+        return false;
+    }
+
+    @Override
+    public boolean cancelAllGenerations() {
+        if (activeGenerations.isEmpty()) {
+            return false;
+        }
+        boolean any = false;
+        for (ActiveGenerationTask task : new ArrayList<>(activeGenerations.values())) {
+            activeGenerations.remove(task.getTextureId(), task);
+            task.cancel();
+            any = true;
+        }
+        return any;
+    }
+
+    @Override
+    public Set<String> getActiveGenerationIds() {
+        return Collections.unmodifiableSet(new java.util.LinkedHashSet<>(activeGenerations.keySet()));
+    }
+
+    @Override
+    public boolean isGenerationActive() {
+        return !activeGenerations.isEmpty();
     }
 
     @Override
@@ -378,7 +491,7 @@ public final class ImageDisplayService implements ImageDisplayApi {
         return result;
     }
 
-    private List<List<String>> generateTextureValuesGrid(File imageFile, String textureId) throws IOException, InterruptedException {
+    private List<List<String>> generateTextureValuesGrid(File imageFile, String textureId, ActiveGenerationTask task, GenerationProgressListener listener) throws IOException, InterruptedException {
         BufferedImage source = ImageIO.read(imageFile);
         if (source == null) {
             throw new IOException("Unsupported image format: " + imageFile.getName());
@@ -389,20 +502,30 @@ public final class ImageDisplayService implements ImageDisplayApi {
 
         int cols = source.getWidth() / TILE_SIZE;
         int rows = source.getHeight() / TILE_SIZE;
+        int totalTiles = rows * cols;
         List<List<String>> valuesGrid = new ArrayList<>(rows);
         Map<String, String> localTileCache = new HashMap<>();
 
+        int currentTile = 0;
         for (int tileY = 0; tileY < rows; tileY++) {
             List<String> row = new ArrayList<>(cols);
             for (int tileX = 0; tileX < cols; tileX++) {
+                if (task.isCancelled() || Thread.currentThread().isInterrupted()) {
+                    throw new CancellationException("Generation cancelled");
+                }
+                currentTile++;
+                notifyProgress(listener, currentTile, totalTiles, "preparing");
+
                 BufferedImage tile = source.getSubimage(tileX * TILE_SIZE, tileY * TILE_SIZE, TILE_SIZE, TILE_SIZE);
                 byte[] skinPng = toPngBytes(createSkinFromTile(tile));
                 String tileHash = Base64.getEncoder().encodeToString(skinPng);
 
                 String token = localTileCache.get(tileHash);
                 if (token == null) {
-                    token = requestSkinToken(skinPng, textureId + "_" + tileY + "_" + tileX);
+                    token = requestSkinTokenViaQueue(skinPng, textureId + "_" + tileY + "_" + tileX, task, listener, currentTile, totalTiles);
                     localTileCache.put(tileHash, token);
+                } else {
+                    notifyProgress(listener, currentTile, totalTiles, "completed");
                 }
                 row.add(token);
             }
@@ -411,7 +534,16 @@ public final class ImageDisplayService implements ImageDisplayApi {
         return valuesGrid;
     }
 
-    private String requestSkinToken(byte[] skinPng, String requestName) throws IOException, InterruptedException {
+    private static void notifyProgress(GenerationProgressListener listener, int current, int total, String statusKey) {
+        if (listener != null) {
+            try {
+                listener.onProgress(current, total, statusKey);
+            } catch (Throwable ignored) {
+            }
+        }
+    }
+
+    private String requestSkinTokenViaQueue(byte[] skinPng, String requestName, ActiveGenerationTask task, GenerationProgressListener listener, int currentTile, int totalTiles) throws IOException, InterruptedException {
         String boundary = "----ImageDisplayMineskin" + UUID.randomUUID();
         List<byte[]> parts = new ArrayList<>();
         parts.add(formField(boundary, "name", requestName));
@@ -420,56 +552,277 @@ public final class ImageDisplayService implements ImageDisplayApi {
         parts.add("\r\n".getBytes(StandardCharsets.UTF_8));
         parts.add(("--" + boundary + "--\r\n").getBytes(StandardCharsets.UTF_8));
 
-        HttpRequest.Builder requestBuilder = HttpRequest.newBuilder()
-                .uri(URI.create("https://api.mineskin.org/v2/generate"))
-                .timeout(Duration.ofSeconds(35))
+        HttpRequest.Builder submitRequestBuilder = HttpRequest.newBuilder()
+                .uri(URI.create("https://api.mineskin.org/v2/queue"))
+                .timeout(Duration.ofSeconds(20))
                 .header("Content-Type", "multipart/form-data; boundary=" + boundary)
                 .header("Accept", "application/json")
-                .header("User-Agent", "ImageDisplay/1.0");
+                .header("User-Agent", "ImageDisplay/1.1");
 
-        if (!apiKey.isBlank()) {
-            String auth = apiKey.startsWith("Bearer ") ? apiKey : "Bearer " + apiKey;
-            requestBuilder.header("Authorization", auth);
+        String taskApiKey = task.getApiKey();
+        if (taskApiKey != null && !taskApiKey.isBlank()) {
+            String auth = taskApiKey.startsWith("Bearer ") ? taskApiKey : "Bearer " + taskApiKey;
+            submitRequestBuilder.header("Authorization", auth);
         }
 
-        HttpRequest request = requestBuilder
+        HttpRequest submitRequest = submitRequestBuilder
                 .POST(HttpRequest.BodyPublishers.ofByteArrays(parts))
                 .build();
 
-        return executeMineSkinRequestWithRetry(request);
-    }
-
-    private String executeMineSkinRequestWithRetry(HttpRequest request) throws IOException, InterruptedException {
         for (int attempt = 1; attempt <= MAX_MINE_SKIN_RETRIES; attempt++) {
-            HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
-            int code = response.statusCode();
-            if (code >= 200 && code < 300) {
-                SignedTextureData data = extractSignedTextureData(response.body());
-                if (data == null || data.value() == null || data.value().isBlank()) {
-                    throw new IOException("MineSkin response does not contain skin texture value");
-                }
-                return data.signature() == null || data.signature().isBlank()
-                        ? data.value()
-                        : data.value() + ";" + data.signature();
+            if (task.isCancelled() || Thread.currentThread().isInterrupted()) {
+                throw new CancellationException("Generation cancelled");
             }
 
-            if (code == 429 || (code >= 500 && code <= 599)) {
-                long retryDelay = resolveRetryDelayMillis(response, attempt);
-                if (attempt == 1 || attempt == MAX_MINE_SKIN_RETRIES) {
-                    messages.consoleWarn("log.service.mineskin-limit", java.util.Map.of(
-                            "code", String.valueOf(code),
-                            "attempt", String.valueOf(attempt),
-                            "max_attempts", String.valueOf(MAX_MINE_SKIN_RETRIES),
-                            "delay_ms", String.valueOf(retryDelay)
-                    ));
+            HttpResponse<String> response;
+            try {
+                response = httpClient.send(submitRequest, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+            } catch (IOException ex) {
+                if (task.isCancelled() || Thread.currentThread().isInterrupted()) {
+                    throw new CancellationException("Generation cancelled");
                 }
-                Thread.sleep(retryDelay);
+                if (attempt == MAX_MINE_SKIN_RETRIES) {
+                    throw ex;
+                }
+                sleepInterruptible(DEFAULT_RETRY_DELAY_MILLIS, task);
                 continue;
             }
 
-            throw new IOException("MineSkin response code " + code);
+            int code = response.statusCode();
+            if (code == 200) {
+                SignedTextureData data = extractSignedTextureData(response.body());
+                if (data != null && data.value() != null && !data.value().isBlank()) {
+                    notifyProgress(listener, currentTile, totalTiles, "completed");
+                    return formatSignedTextureToken(data);
+                }
+            }
+
+            if (code == 202 || code == 200) {
+                String jobId = extractJobId(response.body());
+                if (jobId != null && !jobId.isBlank()) {
+                    notifyProgress(listener, currentTile, totalTiles, "queued");
+                    try {
+                        return pollJobResult(jobId, task, listener, currentTile, totalTiles);
+                    } catch (IOException pollEx) {
+                        if (task.isCancelled() || Thread.currentThread().isInterrupted()) {
+                            throw new CancellationException("Generation cancelled");
+                        }
+                        if (isTransientMojangError(pollEx.getMessage()) && attempt < MAX_MINE_SKIN_RETRIES) {
+                            long delay = 4000L * attempt;
+                            messages.consoleWarn("log.service.mineskin-gateway-delay", Map.of(
+                                    "code", "Mojang",
+                                    "attempt", String.valueOf(attempt),
+                                    "max_attempts", String.valueOf(MAX_MINE_SKIN_RETRIES),
+                                    "delay_ms", String.valueOf(delay)
+                            ));
+                            sleepInterruptible(delay, task);
+                            continue;
+                        }
+                        throw pollEx;
+                    }
+                }
+            }
+
+            if (code == 429 || (code >= 500 && code <= 599)) {
+                long delay = resolveRetryDelayMillis(response, attempt);
+                logRetry(code, attempt, delay);
+                sleepInterruptible(delay, task);
+                continue;
+            }
+
+            throw new IOException("MineSkin queue submit error (HTTP " + code + "): " + extractErrorDetails(response.body()));
         }
-        throw new IOException("MineSkin rate limit retries exceeded");
+
+        throw new IOException("MineSkin failed to process tile after " + MAX_MINE_SKIN_RETRIES + " attempts");
+    }
+
+    private String pollJobResult(String jobId, ActiveGenerationTask task, GenerationProgressListener listener, int currentTile, int totalTiles) throws IOException, InterruptedException {
+        HttpRequest.Builder pollRequestBuilder = HttpRequest.newBuilder()
+                .uri(URI.create("https://api.mineskin.org/v2/queue/" + jobId))
+                .timeout(Duration.ofSeconds(15))
+                .header("Accept", "application/json")
+                .header("User-Agent", "ImageDisplay/1.1");
+
+        String taskApiKey = task.getApiKey();
+        if (taskApiKey != null && !taskApiKey.isBlank()) {
+            String auth = taskApiKey.startsWith("Bearer ") ? taskApiKey : "Bearer " + taskApiKey;
+            pollRequestBuilder.header("Authorization", auth);
+        }
+
+        HttpRequest pollRequest = pollRequestBuilder.GET().build();
+        long pollDelay = DEFAULT_POLL_DELAY_MILLIS;
+
+        for (int pollAttempt = 1; pollAttempt <= MAX_POLL_ATTEMPTS; pollAttempt++) {
+            if (task.isCancelled() || Thread.currentThread().isInterrupted()) {
+                throw new CancellationException("Generation cancelled");
+            }
+            sleepInterruptible(pollDelay, task);
+            if (task.isCancelled() || Thread.currentThread().isInterrupted()) {
+                throw new CancellationException("Generation cancelled");
+            }
+
+            HttpResponse<String> response;
+            try {
+                response = httpClient.send(pollRequest, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+            } catch (IOException ex) {
+                if (task.isCancelled() || Thread.currentThread().isInterrupted()) {
+                    throw new CancellationException("Generation cancelled");
+                }
+                if (pollAttempt == MAX_POLL_ATTEMPTS) {
+                    throw ex;
+                }
+                continue;
+            }
+
+            int code = response.statusCode();
+            if (code == 200) {
+                String body = response.body();
+                JsonObject root = parseJsonObjectSafely(body);
+                if (root != null) {
+                    String status = readPath(root, "job", "status");
+                    if ("completed".equalsIgnoreCase(status)) {
+                        SignedTextureData data = extractSignedTextureData(body);
+                        if (data != null && data.value() != null && !data.value().isBlank()) {
+                            notifyProgress(listener, currentTile, totalTiles, "completed");
+                            return formatSignedTextureToken(data);
+                        }
+                    } else if ("active".equalsIgnoreCase(status)) {
+                        notifyProgress(listener, currentTile, totalTiles, "active");
+                    } else if ("waiting".equalsIgnoreCase(status)) {
+                        notifyProgress(listener, currentTile, totalTiles, "queued");
+                    } else if ("failed".equalsIgnoreCase(status)) {
+                        String error = extractErrorDetails(body);
+                        throw new IOException("MineSkin job failed: " + error);
+                    }
+
+                    long nextDelay = extractNextDelay(root);
+                    if (nextDelay > 0) {
+                        pollDelay = Math.max(1000L, nextDelay);
+                    }
+                }
+                continue;
+            }
+
+            if (code == 429) {
+                long retryAfter = resolveRetryDelayMillis(response, 1);
+                pollDelay = Math.max(1500L, retryAfter);
+                continue;
+            }
+
+            if (code >= 500 && code <= 599) {
+                pollDelay = 2000L;
+                continue;
+            }
+
+            throw new IOException("MineSkin queue poll error (HTTP " + code + "): " + extractErrorDetails(response.body()));
+        }
+
+        throw new IOException("MineSkin queue job timed out (" + jobId + ")");
+    }
+
+    private static boolean isTransientMojangError(String message) {
+        if (message == null) {
+            return false;
+        }
+        String lower = message.toLowerCase(Locale.ROOT);
+        return lower.contains("rate-limit")
+                || lower.contains("rate_limit")
+                || lower.contains("skin_change_failed")
+                || lower.contains("too many requests")
+                || lower.contains("timeout")
+                || lower.contains("timed out");
+    }
+
+    private static void sleepInterruptible(long millis, ActiveGenerationTask task) throws InterruptedException {
+        if (task != null && task.isCancelled()) {
+            throw new CancellationException("Generation cancelled");
+        }
+        if (Thread.currentThread().isInterrupted()) {
+            throw new InterruptedException("Thread interrupted");
+        }
+        if (millis > 0) {
+            Thread.sleep(millis);
+        }
+    }
+
+    private void logRetry(int code, int attempt, long delayMs) {
+        if (attempt >= 3 || attempt == MAX_MINE_SKIN_RETRIES) {
+            String key = code == 429 ? "log.service.mineskin-rate-limit" : "log.service.mineskin-gateway-delay";
+            messages.consoleWarn(key, Map.of(
+                    "code", String.valueOf(code),
+                    "attempt", String.valueOf(attempt),
+                    "max_attempts", String.valueOf(MAX_MINE_SKIN_RETRIES),
+                    "delay_ms", String.valueOf(delayMs)
+            ));
+        }
+    }
+
+    private static String extractJobId(String body) {
+        if (body == null || body.isBlank()) {
+            return null;
+        }
+        try {
+            JsonObject root = JsonParser.parseString(body).getAsJsonObject();
+            return readPath(root, "job", "id");
+        } catch (Exception ignored) {
+            return null;
+        }
+    }
+
+    private static String extractErrorDetails(String body) {
+        if (body == null || body.isBlank()) {
+            return "empty response";
+        }
+        try {
+            JsonObject root = JsonParser.parseString(body).getAsJsonObject();
+            if (root.has("errors") && root.get("errors").isJsonArray()) {
+                JsonArray errors = root.getAsJsonArray("errors");
+                if (!errors.isEmpty()) {
+                    JsonElement first = errors.get(0);
+                    if (first.isJsonObject()) {
+                        JsonObject errObj = first.getAsJsonObject();
+                        if (errObj.has("message")) {
+                            return errObj.get("message").getAsString();
+                        }
+                    }
+                }
+            }
+            if (root.has("message")) {
+                return root.get("message").getAsString();
+            }
+        } catch (Exception ignored) {
+        }
+        return body.length() > 100 ? body.substring(0, 100) + "..." : body;
+    }
+
+    private static long extractNextDelay(JsonObject root) {
+        try {
+            String nextRelative = readPath(root, "rateLimit", "next", "relative");
+            if (nextRelative != null && !nextRelative.isBlank()) {
+                return Long.parseLong(nextRelative);
+            }
+            String delayMillis = readPath(root, "rateLimit", "delay", "millis");
+            if (delayMillis != null && !delayMillis.isBlank()) {
+                return Long.parseLong(delayMillis);
+            }
+        } catch (Exception ignored) {
+        }
+        return -1L;
+    }
+
+    private static JsonObject parseJsonObjectSafely(String json) {
+        try {
+            JsonElement element = JsonParser.parseString(json);
+            return element.isJsonObject() ? element.getAsJsonObject() : null;
+        } catch (Exception ignored) {
+            return null;
+        }
+    }
+
+    private static String formatSignedTextureToken(SignedTextureData data) {
+        return data.signature() == null || data.signature().isBlank()
+                ? data.value()
+                : data.value() + ";" + data.signature();
     }
 
     private void loadDiskCache() {
@@ -883,4 +1236,41 @@ public final class ImageDisplayService implements ImageDisplayApi {
     }
 
     private record SignedTextureData(String value, String signature) {}
+
+    public static final class ActiveGenerationTask {
+        private final String textureId;
+        private final String apiKey;
+        private final AtomicBoolean cancelled = new AtomicBoolean(false);
+        private volatile Thread workerThread;
+
+        public ActiveGenerationTask(String textureId, String apiKey) {
+            this.textureId = textureId;
+            this.apiKey = apiKey;
+        }
+
+        public String getTextureId() {
+            return textureId;
+        }
+
+        public String getApiKey() {
+            return apiKey;
+        }
+
+        public boolean isCancelled() {
+            return cancelled.get();
+        }
+
+        public void cancel() {
+            if (cancelled.compareAndSet(false, true)) {
+                Thread worker = this.workerThread;
+                if (worker != null && worker.isAlive()) {
+                    worker.interrupt();
+                }
+            }
+        }
+
+        public void setWorkerThread(Thread workerThread) {
+            this.workerThread = workerThread;
+        }
+    }
 }
